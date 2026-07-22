@@ -147,6 +147,10 @@ def collect_stats(db_path: str) -> dict:
                 stats[f"{table}_rows"] = n
             except Exception:
                 stats[f"{table}_rows"] = 0
+                print(
+                    f"  {_c('yellow', 'warning')}: could not count rows in table '{table}'",
+                    file=sys.stderr,
+                )
 
         # Data sizes for the big three
         for table in ("message", "part", "event"):
@@ -163,7 +167,10 @@ def collect_stats(db_path: str) -> dict:
                 stats[f"{table}_data_max"] = row["max_len"] or 0
                 stats[f"{table}_data_total"] = row["total_len"] or 0
             except Exception:
-                pass
+                print(
+                    f"  {_c('yellow', 'warning')}: could not read data stats for table '{table}'",
+                    file=sys.stderr,
+                )
 
         # Session age
         try:
@@ -233,19 +240,18 @@ def _vacuum_with_progress(conn: sqlite3.Connection, db_path: str) -> None:
 
     def _poll() -> None:
         seen_sizes: set[int] = set()
+        last_len = 0
         while not done.is_set():
             if os.path.exists(temp_path):
                 size = os.path.getsize(temp_path)
                 if size not in seen_sizes:
                     seen_sizes.add(size)
-                    print(
-                        f"\r    writing {fmt_bytes(size)} ...",
-                        end="",
-                        flush=True,
-                    )
+                    line = f"\r    writing {fmt_bytes(size)} ..."
+                    last_len = max(last_len, len(line) - 1)  # -1 for \r
+                    print(line, end="", flush=True)
             time.sleep(0.3)
         # Erase the progress line
-        print("\r" + " " * 40 + "\r", end="", flush=True)
+        print("\r" + " " * last_len + "\r", end="", flush=True)
 
     poller = threading.Thread(target=_poll, daemon=True)
     poller.start()
@@ -254,6 +260,12 @@ def _vacuum_with_progress(conn: sqlite3.Connection, db_path: str) -> None:
     finally:
         done.set()
         poller.join(timeout=1)
+        # If VACUUM didn't complete, the temp file may remain — clean it up.
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 # ── Commands ─────────────────────────────────────────────────────────────────
@@ -351,12 +363,20 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
     # ── 1. Check OpenCode is not running ──────────────────────────────────
     pids = check_db_locked(db_path)
     if pids is None:
-        _info(
-            _c("yellow",
-               "Could not verify DB is unused (fuser not available). "
-               "Make sure OpenCode is closed."
+        if args.skip_fuser:
+            _info(
+                _c("yellow",
+                   "Could not verify DB is unused (fuser not available). "
+                   "Proceeding because --skip-fuser was given."
+                )
             )
-        )
+        else:
+            _fail(
+                "Could not verify whether the database is in use.\n"
+                "  fuser is not installed. Install it, or re-run with:\n"
+                "    ocdbc vacuum --skip-fuser\n"
+                "  (only if you are certain OpenCode is not running)"
+            )
     elif pids:
         _fail(
             f"Database is in use by PID(s): {', '.join(pids)}.\n"
@@ -364,6 +384,12 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
         )
     else:
         _ok("No process has the database open")
+        _info(
+            _c("dim",
+               "Keep OpenCode closed until VACUUM completes — "
+               "re-opening it before this finishes will cause data loss."
+            )
+        )
 
     # ── 2. Collect before stats ───────────────────────────────────────────
     before = collect_stats(db_path)
@@ -404,7 +430,10 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
     _info("Checkpointing WAL …")
     conn = _connect(db_path)
     try:
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error as exc:
+            _fail(f"WAL checkpoint failed: {exc}")
         _ok("WAL checkpointed")
 
         _info("Running integrity check …")
@@ -418,6 +447,7 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
 
     # ── 5. Create backup ──────────────────────────────────────────────────
     # WAL is already flushed — copying just the .db is a complete backup.
+    backup_path = None  # track for error messages even when --no-backup
     if not args.no_backup:
         ts = datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S")
         backup_path = f"{db_path}.backup.{ts}"
@@ -428,6 +458,23 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
         except OSError as exc:
             _fail(f"Failed to create backup: {exc}")
         _ok(f"Backup created ({fmt_bytes(os.path.getsize(backup_path))})")
+
+        # Verify the backup is sound
+        _info("Verifying backup integrity …")
+        try:
+            bc = _connect(backup_path)
+            try:
+                bresult = bc.execute("PRAGMA integrity_check").fetchone()[0]
+                if bresult != "ok":
+                    _fail(
+                        f"Backup integrity check failed: {bresult}\n"
+                        f"  Backup at {backup_path} may be corrupt."
+                    )
+            finally:
+                bc.close()
+            _ok("Backup integrity verified")
+        except sqlite3.Error as exc:
+            _fail(f"Failed to verify backup: {exc}")
     else:
         _info(_c("yellow", "Skipping backup (--no-backup)"))
 
@@ -436,7 +483,10 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
     try:
         # 6a. Enable incremental auto-vacuum
         _info("Enabling auto_vacuum = INCREMENTAL …")
-        conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+        try:
+            conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+        except sqlite3.Error as exc:
+            _fail(f"Failed to set auto_vacuum: {exc}")
         mode = conn.execute("PRAGMA auto_vacuum").fetchone()[0]
         _ok(f"auto_vacuum set to {auto_vacuum_label(mode)}")
 
@@ -447,7 +497,10 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
 
         # 6c. Re-enable WAL (VACUUM resets journal_mode to delete)
         _info("Re-enabling WAL journal mode …")
-        conn.execute("PRAGMA journal_mode = WAL")
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.Error as exc:
+            _fail(f"Failed to re-enable WAL journal mode: {exc}")
         journal = conn.execute("PRAGMA journal_mode").fetchone()[0]
         _ok(f"journal_mode = {journal}")
 
@@ -455,7 +508,15 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
         _info("Running final integrity check …")
         result = conn.execute("PRAGMA integrity_check").fetchone()[0]
         if result != "ok":
-            _fail(f"Post-VACUUM integrity check failed: {result}")
+            restore_hint = (
+                f"\n  Restore from backup: cp {backup_path} {db_path}"
+                if backup_path
+                else "\n  No backup was created (--no-backup was used)."
+            )
+            _fail(
+                f"Post-VACUUM integrity check failed: {result}"
+                + restore_hint
+            )
         _ok("Integrity check passed")
     finally:
         conn.close()
@@ -474,7 +535,7 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
     else:
         print(f"  Growth:   {_c('yellow', fmt_bytes(-reclaimed))} (unexpected — check backup)")
 
-    if not args.no_backup:
+    if backup_path:
         print()
         print(
             f"  Backup:   {backup_path}\n"
@@ -495,10 +556,12 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent(f"""\
         examples:
-          ocdbc analyze                     # read-only health report
-          ocdbc vacuum                      # full safe VACUUM sequence
-          ocdbc vacuum --no-backup --force  # skip backup & confirmation
-          ocdbc analyze --path /tmp/my.db   # custom database path
+          ocdbc analyze                        # read-only health report
+          ocdbc vacuum                         # full safe VACUUM sequence
+          ocdbc vacuum --force                 # skip confirmation
+          ocdbc vacuum --skip-fuser --force    # fuser not installed
+          ocdbc vacuum --no-backup --force     # skip backup & confirmation
+          ocdbc analyze --path /tmp/my.db      # custom database path
 
         default database: {DEFAULT_DB}
         """),
@@ -526,6 +589,10 @@ def main() -> None:
     )
     p_vacuum.add_argument(
         "--force", "-f", action="store_true", help="Skip confirmation prompt"
+    )
+    p_vacuum.add_argument(
+        "--skip-fuser", action="store_true",
+        help="Proceed even if fuser is not installed (use with caution)",
     )
 
     args = parser.parse_args()

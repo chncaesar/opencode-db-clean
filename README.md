@@ -39,14 +39,14 @@ ocdbc vacuum
 
 The vacuum command performs these steps in order:
 
-1. **fuser check** — refuse if OpenCode still has the DB open
-2. **Integrity check** — abort if database is corrupt
-3. **Backup** — timestamped copy alongside the original (`opencode.db.backup.2026-07-22T...`)
-4. **WAL checkpoint** — flush write-ahead log into the main DB
+1. **fuser check** — refuse if OpenCode still has the DB open (unless `--skip-fuser`)
+2. **WAL checkpoint** — flush write-ahead log into the main DB
+3. **Integrity check** — abort if database is corrupt
+4. **Backup** — timestamped copy, then verify backup integrity
 5. **Enable `auto_vacuum = INCREMENTAL`** — prevent future freelist bloat
-6. **VACUUM** — rebuild the database (reclaims freelist pages)
+6. **VACUUM** — rebuild the database with progress indication
 7. **Re-enable WAL** — `VACUUM` resets journal mode; restore it
-8. **Integrity check** — verify the result
+8. **Final integrity check** — verify the result
 
 ```bash
 # Skip the confirmation prompt
@@ -55,16 +55,20 @@ ocdbc vacuum --force
 # Skip backup (dangerous — backup is recommended)
 ocdbc vacuum --no-backup --force
 
+# Proceed without fuser installed (use with caution)
+ocdbc vacuum --skip-fuser --force
+
 # Custom database path
 ocdbc vacuum --path /custom/path/opencode.db
 ```
 
 ### Safety
 
-- **Never touches the database before passing integrity checks**
-- **Creates a timestamped backup before every VACUUM** (unless `--no-backup`)
 - **Refuses to run if OpenCode has the database open** (detected via `fuser`)
-- **Verify integrity before and after** — abort if anything looks wrong
+- **Refuses to run if fuser is not installed** — pass `--skip-fuser` to override
+- **Checks integrity before and after** — abort if anything looks wrong
+- **Creates a verified timestamped backup before VACUUM** (unless `--no-backup`)
+- **VACUUM uses atomic rename** — original DB untouched if the operation fails
 
 ## Example
 
