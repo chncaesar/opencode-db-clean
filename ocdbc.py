@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """ocdbc — OpenCode Database Cleaner.
 
 Safely analyze and shrink OpenCode's SQLite database.
