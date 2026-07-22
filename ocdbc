@@ -398,11 +398,16 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
             _info("Cancelled.")
             return
 
-    # ── 4. Integrity check (before) ───────────────────────────────────────
+    # ── 4. Checkpoint WAL + integrity check ───────────────────────────────
+    # Checkpoint BEFORE backup so the .db file contains all committed data.
     print()
-    _info("Running integrity check …")
+    _info("Checkpointing WAL …")
     conn = _connect(db_path)
     try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        _ok("WAL checkpointed")
+
+        _info("Running integrity check …")
         result = conn.execute("PRAGMA integrity_check").fetchone()[0]
         if result != "ok":
             conn.close()
@@ -412,6 +417,7 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
         conn.close()
 
     # ── 5. Create backup ──────────────────────────────────────────────────
+    # WAL is already flushed — copying just the .db is a complete backup.
     if not args.no_backup:
         ts = datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S")
         backup_path = f"{db_path}.backup.{ts}"
@@ -428,29 +434,24 @@ def cmd_vacuum(args: argparse.Namespace) -> None:
     # ── 6. Execute VACUUM sequence ────────────────────────────────────────
     conn = _connect(db_path)
     try:
-        # 6a. Checkpoint WAL
-        _info("Checkpointing WAL …")
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        _ok("WAL checkpointed")
-
-        # 6b. Enable incremental auto-vacuum
+        # 6a. Enable incremental auto-vacuum
         _info("Enabling auto_vacuum = INCREMENTAL …")
         conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
         mode = conn.execute("PRAGMA auto_vacuum").fetchone()[0]
         _ok(f"auto_vacuum set to {auto_vacuum_label(mode)}")
 
-        # 6c. VACUUM
+        # 6b. VACUUM
         _info("Running VACUUM (may take 30–90 seconds) …")
         _vacuum_with_progress(conn, db_path)
         _ok("VACUUM complete")
 
-        # 6d. Re-enable WAL (VACUUM resets journal_mode to delete)
+        # 6c. Re-enable WAL (VACUUM resets journal_mode to delete)
         _info("Re-enabling WAL journal mode …")
         conn.execute("PRAGMA journal_mode = WAL")
         journal = conn.execute("PRAGMA journal_mode").fetchone()[0]
         _ok(f"journal_mode = {journal}")
 
-        # 6e. Final integrity check
+        # 6d. Final integrity check
         _info("Running final integrity check …")
         result = conn.execute("PRAGMA integrity_check").fetchone()[0]
         if result != "ok":
