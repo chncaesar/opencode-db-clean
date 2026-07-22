@@ -12,11 +12,16 @@ OpenCode stores all session history in a single SQLite database (`~/.local/share
 ## Installation
 
 ```bash
+# from PyPI (recommended)
+pip install ocdbc
+
+# from GitHub
+pip install git+https://github.com/chncaesar/opencode-db-clean.git
+
+# from source
 git clone https://github.com/chncaesar/opencode-db-clean.git
 cd opencode-db-clean
-chmod +x ocdbc
-# optional: symlink into PATH
-ln -s "$(pwd)/ocdbc" ~/.local/bin/ocdbc
+pip install .
 ```
 
 Requires Python 3.8+ (stdlib only, zero pip dependencies).
@@ -102,9 +107,10 @@ $ ocdbc vacuum
 
   Proceed with VACUUM? [y/N] y
 
+  ✓ WAL checkpointed
   ✓ Integrity check passed
   ✓ Backup created (1.3 GB)
-  ✓ WAL checkpointed
+  ✓ Backup integrity verified
   ✓ auto_vacuum set to INCREMENTAL
   ✓ VACUUM complete
   ✓ journal_mode = wal
@@ -113,8 +119,8 @@ $ ocdbc vacuum
 Results
 ──────────────────────────────────────────────────────────
   Before:   1.3 GB
-  After:    534 MB
-  Reclaimed: 766 MB
+  After:    578 MB
+  Reclaimed: 731 MB
 
   Backup:   /home/zjc/.local/share/opencode/opencode.db.backup.2026-07-22T...
   (Keep it until you verify OpenCode works correctly)
