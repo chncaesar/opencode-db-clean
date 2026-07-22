@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ocdbc"
+version = "0.1.0"
+description = "Safely analyze and vacuum OpenCode's SQLite database"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.8"
+dependencies = []
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Utilities",
+]
+
+[project.scripts]
+ocdbc = "ocdbc:main"
+
+[project.urls]
+Homepage = "https://github.com/chncaesar/opencode-db-clean"
+Repository = "https://github.com/chncaesar/opencode-db-clean.git"
+Issues = "https://github.com/chncaesar/opencode-db-clean/issues"
+
+[tool.setuptools]
+py-modules = ["ocdbc"]
