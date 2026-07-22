@@ -1,5 +1,7 @@
 # ocdbc — OpenCode Database Cleaner
 
+[![PyPI](https://img.shields.io/pypi/v/ocdbc.svg)](https://pypi.org/project/ocdbc/)
+
 Safely analyze and shrink [OpenCode](https://github.com/anomalyco/opencode)'s SQLite database.
 
 OpenCode stores all session history in a single SQLite database (`~/.local/share/opencode/opencode.db`). Over time, compaction and session archival leave behind **freelist pages** — free space inside the file that is never returned to the filesystem unless `auto_vacuum` is enabled and `VACUUM` is run. Databases routinely bloat to 1–2 GB, with >50% being dead air.
@@ -10,6 +12,8 @@ OpenCode stores all session history in a single SQLite database (`~/.local/share
 - **`vacuum`** — safe VACUUM sequence with backup, integrity checks, and `auto_vacuum = INCREMENTAL` enablement
 
 ## Installation
+
+`ocdbc` is available on [PyPI](https://pypi.org/project/ocdbc/):
 
 ```bash
 # from PyPI (recommended)
