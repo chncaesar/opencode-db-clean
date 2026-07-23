@@ -2,14 +2,23 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ocdbc.svg)](https://pypi.org/project/ocdbc/)
 
-Safely analyze and shrink [OpenCode](https://github.com/anomalyco/opencode)'s SQLite database.
+Your OpenCode database may be much larger than the data it still contains.
 
-OpenCode stores all session history in a single SQLite database (`~/.local/share/opencode/opencode.db`). Over time, compaction and session archival leave behind **freelist pages** — free space inside the file that is never returned to the filesystem unless `auto_vacuum` is enabled and `VACUUM` is run. Databases routinely bloat to 1–2 GB, with >50% being dead air.
+OpenCode keeps session history in a local SQLite database at `~/.local/share/opencode/opencode.db`. After heavy use, compaction, deletion, or archival can leave behind **freelist pages**: empty pages inside the database file that SQLite can reuse, but the filesystem still counts as occupied disk space.
+
+That means a 1.3 GB database might only contain 525 MB of live data.
+
+`ocdbc` helps OpenCode users answer two practical questions:
+
+- How much of my OpenCode database is live data?
+- If there is significant freelist bloat, how can I safely reclaim the space?
 
 `ocdbc` provides two commands:
 
 - **`analyze`** — read-only health report (no risk)
 - **`vacuum`** — safe VACUUM sequence with backup, integrity checks, and `auto_vacuum = INCREMENTAL` enablement
+
+Part of the [OpenCode Reliability Toolkit](https://jczhu.com/opencode-tools/): small tools for making AI coding agents more reliable in real engineering workflows.
 
 ## Installation
 
@@ -39,6 +48,8 @@ ocdbc analyze
 ```
 
 Shows: DB size, live data vs freelist, table sizes, session age distribution, and the 5 largest messages.
+
+Run this first. If the freelist percentage is small, there may be nothing worth cleaning.
 
 ### Vacuum (safe sequence)
 
@@ -78,6 +89,21 @@ ocdbc vacuum --path /custom/path/opencode.db
 - **Checks integrity before and after** — abort if anything looks wrong
 - **Creates a verified timestamped backup before VACUUM** (unless `--no-backup`)
 - **VACUUM uses atomic rename** — original DB untouched if the operation fails
+
+## When to use this
+
+Use `ocdbc` when:
+
+- `opencode.db` has grown large and you want to know whether the space is live data or freelist bloat.
+- You use OpenCode heavily and want a safe local runtime maintenance check.
+- You want a read-only report before deciding whether to run SQLite `VACUUM`.
+- You want backups and integrity checks around database cleanup instead of running manual SQLite commands.
+
+## When not to use this
+
+Do not use `ocdbc vacuum` while OpenCode is running against the same database. The default command refuses to run if it detects an open database handle. Close OpenCode first, run `ocdbc analyze`, then vacuum only when the report shows meaningful reclaimable space.
+
+`ocdbc` does not delete sessions or decide which history is valuable. It only analyzes SQLite storage layout and, when requested, rebuilds the database file to return unused pages to the filesystem.
 
 ## Example
 
@@ -136,12 +162,12 @@ Results
 - [OpenCode PR #16730](https://github.com/anomalyco/opencode/pull/16730) — upstream fix (auto-vacuum, WAL checkpoint)
 - [ocgc](https://github.com/whtsky/ocgc) — alternative garbage collector with session purging
 
-## More OpenCode Tools
+## OpenCode Reliability Toolkit
 
 | Tool | Description |
 |------|-------------|
-| [opencode-db-clean](https://github.com/chncaesar/opencode-db-clean) | Reclaim disk space from bloated SQLite databases |
 | [opencode-waitfor](https://github.com/chncaesar/opencode-waitfor) | `wait_for` for HTTP/TCP/command readiness checks |
+| [opencode-db-clean](https://github.com/chncaesar/opencode-db-clean) | Reclaim disk space from bloated SQLite databases |
 | [opencode-session-reflection](https://github.com/chncaesar/opencode-session-reflection) | Qualitative review of past coding sessions |
 | [opencode-fleet](https://github.com/chncaesar/opencode-fleet) | Multi-node remote OpenCode orchestration |
 
