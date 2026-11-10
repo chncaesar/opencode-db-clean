@@ -162,15 +162,6 @@ Results
 - [OpenCode PR #16730](https://github.com/anomalyco/opencode/pull/16730) — upstream fix (auto-vacuum, WAL checkpoint)
 - [ocgc](https://github.com/whtsky/ocgc) — alternative garbage collector with session purging
 
-## OpenCode Reliability Toolkit
-
-| Tool | Description |
-|------|-------------|
-| [opencode-waitfor](https://github.com/chncaesar/opencode-waitfor) | `wait_for` for HTTP/TCP/command readiness checks |
-| [opencode-db-clean](https://github.com/chncaesar/opencode-db-clean) | Reclaim disk space from bloated SQLite databases |
-| [opencode-session-reflection](https://github.com/chncaesar/opencode-session-reflection) | Qualitative review of past coding sessions |
-| [opencode-fleet](https://github.com/chncaesar/opencode-fleet) | Multi-node remote OpenCode orchestration |
-
 ## License
 
 MIT
